@@ -47,8 +47,6 @@
           <div class="vl-grow"></div>
 
           <div id="vl-current-label" class="vl-current-label"></div>
-
-          <a id="vl-open-raw" class="vl-btn" target="_blank" rel="noopener noreferrer">Open raw</a>
         </header>
 
         <main id="vl-root"></main>
@@ -84,15 +82,12 @@
     const siteId = params.get("site");
     const root = document.getElementById("vl-root");
     const label = document.getElementById("vl-current-label");
-    const rawLink = document.getElementById("vl-open-raw");
     const select = document.getElementById("vl-site-select");
 
     if (!siteId) {
       state.current = null;
       select.value = "";
       label.textContent = "Directory";
-      rawLink.href = "/";
-      rawLink.style.visibility = "hidden";
       renderDirectory(root);
       return;
     }
@@ -102,8 +97,6 @@
       state.current = null;
       select.value = "";
       label.textContent = "Directory";
-      rawLink.href = "/";
-      rawLink.style.visibility = "hidden";
       renderDirectory(root, "That export was not found.");
       return;
     }
@@ -111,8 +104,6 @@
     state.current = site;
     select.value = site.id;
     label.textContent = site.name || site.pageTitle || site.entry;
-    rawLink.href = "/" + stripLeadingSlash(site.entry);
-    rawLink.style.visibility = "visible";
 
     renderViewer(root, site);
   }
@@ -173,8 +164,7 @@
           <h3>${escapeHtml(site.name || site.pageTitle || site.id)}</h3>
           <p>${escapeHtml(site.description || site.pageTitle || site.entry)}</p>
           <div class="vl-card-actions">
-            <button class="vl-btn vl-btn-primary" type="button">Open in shell</button>
-            <a class="vl-btn" href="/${escapeAttr(stripLeadingSlash(site.entry))}" target="_blank" rel="noopener noreferrer">Open raw</a>
+            <button class="vl-btn vl-btn-primary" type="button">Open</button>
           </div>
         `;
 
