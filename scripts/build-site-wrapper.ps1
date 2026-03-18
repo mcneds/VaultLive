@@ -92,7 +92,6 @@ function Write-Utf8NoBom {
 
 function Escape-RegexReplacement {
   param([string]$Value)
-
   return $Value.Replace('\', '\\').Replace('$', '$$')
 }
 
@@ -104,15 +103,15 @@ function Normalize-ExportedPageHtml {
   )
 
   if (-not (Test-Path $PagePath)) {
-    Write-Warning "Skipping missing page: $PagePath"
-    return
+    throw "Missing exported page: $PagePath"
   }
 
   $content = [System.IO.File]::ReadAllText($PagePath, [System.Text.Encoding]::UTF8)
   $relativePagePath = ($RelativePagePath -replace "\\", "/")
   $escapedRelativePagePath = Escape-RegexReplacement $relativePagePath
+  $fileName = [System.IO.Path]::GetFileName($relativePagePath)
+  $escapedFileName = [Regex]::Escape($fileName)
 
-  # Keep Obsidian assets relative to the exported page folder.
   if ($content -match '<base\s+href="[^"]*"\s*/?>') {
     $content = [System.Text.RegularExpressions.Regex]::Replace(
       $content,
@@ -121,14 +120,14 @@ function Normalize-ExportedPageHtml {
     )
   }
 
-  # Make page identity folder-aware.
   if ($content -match '<meta\s+name="pathname"\s+content="[^"]*"\s*/?>') {
     $content = [System.Text.RegularExpressions.Regex]::Replace(
       $content,
       '<meta\s+name="pathname"\s+content="[^"]*"\s*/?>',
       '<meta name="pathname" content="' + $escapedRelativePagePath + '">'
     )
-  } else {
+  }
+  else {
     $content = $content -replace '<head>', ('<head>' + [Environment]::NewLine + '<meta name="pathname" content="' + $relativePagePath + '">')
   }
 
@@ -140,16 +139,12 @@ function Normalize-ExportedPageHtml {
     )
   }
 
-  # Rewrite only document self-links / same-page links from bare filename to repo-relative page path.
-  $escapedFileName = [Regex]::Escape(([System.IO.Path]::GetFileName($relativePagePath)))
-
   $content = [System.Text.RegularExpressions.Regex]::Replace(
     $content,
     '(?<attr>\b(?:href|data-href|content)=")' + $escapedFileName + '(?<suffix>(?:#[^"]*)?)"',
     '${attr}' + $escapedRelativePagePath + '${suffix}"'
   )
 
-  # Update wrapper injection.
   $injection = '<!-- vault-wrapper:start --><script defer src="' + $RootRelativePrefix + '/assets/wrapper.js" data-wrapper-root="' + $RootRelativePrefix + '"></script><!-- vault-wrapper:end -->'
 
   if ($content -match '(?s)<!-- vault-wrapper:start -->.*?<!-- vault-wrapper:end -->') {
@@ -163,6 +158,16 @@ function Normalize-ExportedPageHtml {
   }
 
   Write-Utf8NoBom -Path $PagePath -Content $content
+
+  $verified = [System.IO.File]::ReadAllText($PagePath, [System.Text.Encoding]::UTF8)
+
+  $pathnameOk = $verified -match [Regex]::Escape('<meta name="pathname" content="' + $relativePagePath + '">')
+  $ogOk = $verified -match [Regex]::Escape('<meta property="og:url" content="' + $relativePagePath + '">')
+  $wrapperOk = $verified -match [Regex]::Escape('data-wrapper-root="' + $RootRelativePrefix + '"')
+
+  if (-not ($pathnameOk -and $ogOk -and $wrapperOk)) {
+    throw "Normalization verification failed for '$RelativePagePath'. The page was not rewritten into nested-host-safe form."
+  }
 }
 
 $rootPath = [System.IO.Path]::GetFullPath($RootDir)
@@ -194,8 +199,7 @@ foreach ($metadataFile in $metadataFiles) {
 
     $relativePagePath = if ([string]::IsNullOrWhiteSpace($relativeRoot)) {
       $fileKey
-    }
-    else {
+    } else {
       ($relativeRoot.TrimEnd("/") + "/" + $fileKey)
     }
 
@@ -218,8 +222,7 @@ foreach ($metadataFile in $metadataFiles) {
   $entryKey = if ($shownInTree.Count -gt 0) { [string]$shownInTree[0] } else { $null }
   $entryPage = if ($entryKey) {
     $pages | Where-Object { $_.file -eq $entryKey } | Select-Object -First 1
-  }
-  else {
+  } else {
     $null
   }
 
@@ -260,6 +263,14 @@ $sites = @(
     @{ Expression = { $_.pageTitle } }
 )
 
+foreach ($site in $sites) {
+  foreach ($page in $site.pages) {
+    $pagePath = Join-Path $rootPath ($page.path -replace "/", "\")
+    $rootRelative = Get-RootRelativePrefix -RelativeFilePath $page.path
+    Normalize-ExportedPageHtml -PagePath $pagePath -RelativePagePath $page.path -RootRelativePrefix $rootRelative
+  }
+}
+
 $manifest = [PSCustomObject]@{
   generatedAt = (Get-Date).ToString("o")
   siteCount   = @($sites).Count
@@ -268,13 +279,5 @@ $manifest = [PSCustomObject]@{
 
 $manifestPath = Join-Path $rootPath "site-index.json"
 Write-Utf8NoBom -Path $manifestPath -Content (($manifest | ConvertTo-Json -Depth 8) + [Environment]::NewLine)
-
-foreach ($site in $sites) {
-  foreach ($page in $site.pages) {
-    $pagePath = Join-Path $rootPath ($page.path -replace "/", "\")
-    $rootRelative = Get-RootRelativePrefix -RelativeFilePath $page.path
-    Normalize-ExportedPageHtml -PagePath $pagePath -RelativePagePath $page.path -RootRelativePrefix $rootRelative
-  }
-}
 
 Write-Host ("Generated wrapper manifest for {0} site(s)." -f @($sites).Count)
