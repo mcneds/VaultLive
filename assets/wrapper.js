@@ -17,34 +17,25 @@
         : "."
   );
 
-  var looksLikeExportedSite =
-    !!document.querySelector(".obsidian-document") ||
-    !!document.querySelector("#main-horizontal") ||
-    !!document.querySelector("#center-content");
-
+  var repoRootUrl = getRepoRootUrl(root);
   var isDirectoryPage = !!directory;
 
-  if (!isDirectoryPage && !looksLikeExportedSite) {
-    return;
+  if (!isDirectoryPage) {
+    ensureStylesheet();
   }
 
-  if (!directory) {
-    ensureStylesheet(root);
-  }
-
-  fetchManifest(root)
+  fetchManifest()
     .then(function (manifest) {
-      if (directory) {
-        renderDirectory(manifest, root);
-        return;
+      if (isDirectoryPage) {
+        renderDirectory(manifest);
+      } else {
+        renderSwitcher(manifest);
       }
-
-      renderSwitcher(manifest, root);
     })
     .catch(function (error) {
       console.error("Vault wrapper could not load the site manifest.", error);
 
-      if (directory) {
+      if (isDirectoryPage) {
         directory.replaceChildren(
           createEmptyState(
             "The site directory could not be loaded.",
@@ -62,25 +53,26 @@
     return String(value).replace(/\\/g, "/").replace(/\/+$/, "");
   }
 
-  function toAbsoluteUrl(baseRoot, relativePath) {
+  function getRepoRootUrl(baseRoot) {
+    var pageUrl = new URL(window.location.href);
+
+    if (baseRoot === ".") {
+      return new URL("./", pageUrl);
+    }
+
+    return new URL(baseRoot.replace(/\/+$/, "") + "/", pageUrl);
+  }
+
+  function toRepoUrl(relativePath) {
     var cleanedPath = String(relativePath || "")
       .replace(/^\/+/, "")
       .replace(/\\/g, "/");
 
-    var baseHref;
-
-    if (baseRoot === ".") {
-      baseHref = "./";
-    } else {
-      baseHref = baseRoot + "/";
-    }
-
-    return new URL(cleanedPath || "", baseHref, window.location.href);
+    return new URL(cleanedPath, repoRootUrl).href;
   }
 
-  function fetchManifest(baseRoot) {
-    var manifestUrl = toAbsoluteUrl(baseRoot, "site-index.json");
-    return fetch(manifestUrl.href, { cache: "no-store" }).then(function (response) {
+  function fetchManifest() {
+    return fetch(toRepoUrl("site-index.json"), { cache: "no-store" }).then(function (response) {
       if (!response.ok) {
         throw new Error("Manifest request failed with status " + response.status + ".");
       }
@@ -89,20 +81,16 @@
     });
   }
 
-  function ensureStylesheet(baseRoot) {
+  function ensureStylesheet() {
     if (document.querySelector("link[data-vault-wrapper-style='true']")) {
       return;
     }
 
     var link = document.createElement("link");
     link.rel = "stylesheet";
-    link.href = toAbsoluteUrl(baseRoot, "assets/wrapper.css").href;
+    link.href = toRepoUrl("assets/wrapper.css");
     link.dataset.vaultWrapperStyle = "true";
     document.head.appendChild(link);
-  }
-
-  function resolveHref(baseRoot, relativePath) {
-    return toAbsoluteUrl(baseRoot, relativePath).href;
   }
 
   function normalizePathname(pathname) {
@@ -141,7 +129,7 @@
     }).format(date);
   }
 
-  function renderDirectory(manifest, baseRoot) {
+  function renderDirectory(manifest) {
     var sites = toArray(manifest.sites);
     var query = "";
 
@@ -201,12 +189,12 @@
       });
 
       groups.forEach(function (groupSites, groupName) {
-        directory.appendChild(createGroup(groupName, groupSites, baseRoot));
+        directory.appendChild(createGroup(groupName, groupSites));
       });
     }
   }
 
-  function createGroup(groupName, groupSites, baseRoot) {
+  function createGroup(groupName, groupSites) {
     var section = document.createElement("section");
     section.className = "vault-wrapper-group";
 
@@ -234,14 +222,14 @@
     grid.className = "vault-wrapper-grid";
 
     groupSites.forEach(function (site) {
-      grid.appendChild(createSiteCard(site, baseRoot));
+      grid.appendChild(createSiteCard(site));
     });
 
     section.appendChild(grid);
     return section;
   }
 
-  function createSiteCard(site, baseRoot) {
+  function createSiteCard(site) {
     var article = document.createElement("article");
     article.className = "vault-wrapper-card";
 
@@ -269,7 +257,7 @@
 
     var link = document.createElement("a");
     link.className = "vault-wrapper-card-link";
-    link.href = resolveHref(baseRoot, site.entry);
+    link.href = toRepoUrl(site.entry);
     link.textContent = "Open site";
 
     article.append(meta, heading, subtitle, description, link);
@@ -290,7 +278,7 @@
     return wrapper;
   }
 
-  function renderSwitcher(manifest, baseRoot) {
+  function renderSwitcher(manifest) {
     var sites = toArray(manifest.sites);
 
     if (!sites.length || document.querySelector(".vault-wrapper-switcher")) {
@@ -298,6 +286,7 @@
     }
 
     var currentPath = normalizePathname(window.location.pathname);
+
     var currentSite = sites.find(function (site) {
       var entryPath = normalizePathname(site.entry);
       var rootPath = normalizePathname(site.root);
@@ -305,7 +294,7 @@
       return (
         currentPath === entryPath ||
         currentPath.endsWith("/" + entryPath) ||
-        (rootPath && (currentPath === rootPath || currentPath.indexOf(rootPath + "/") !== -1))
+        (rootPath && currentPath.indexOf(rootPath + "/") !== -1)
       );
     }) || null;
 
@@ -339,14 +328,14 @@
 
     var homeLink = document.createElement("a");
     homeLink.className = "vault-wrapper-home-link";
-    homeLink.href = resolveHref(baseRoot, "");
+    homeLink.href = repoRootUrl.href;
     homeLink.textContent = "Back to directory";
 
     var siteList = document.createElement("div");
     siteList.className = "vault-wrapper-site-list";
 
     sites.forEach(function (site) {
-      siteList.appendChild(createSwitcherLink(site, currentSite, baseRoot));
+      siteList.appendChild(createSwitcherLink(site, currentSite));
     });
 
     panel.append(panelHeader, homeLink, siteList);
@@ -374,11 +363,11 @@
     });
   }
 
-  function createSwitcherLink(site, currentSite, baseRoot) {
+  function createSwitcherLink(site, currentSite) {
     var link = document.createElement("a");
     var isCurrent = currentSite && currentSite.entry === site.entry;
     link.className = "vault-wrapper-site-link" + (isCurrent ? " is-current" : "");
-    link.href = resolveHref(baseRoot, site.entry);
+    link.href = toRepoUrl(site.entry);
 
     var copy = document.createElement("span");
     copy.className = "vault-wrapper-site-copy";
