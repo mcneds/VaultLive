@@ -96,6 +96,190 @@ function Write-Utf8NoBom {
   [System.IO.File]::WriteAllText($Path, $Content, $encoding)
 }
 
+function Convert-ToPlainObject {
+  param(
+    $Value
+  )
+
+  if ($null -eq $Value) {
+    return $null
+  }
+
+  if ($Value -is [System.Collections.IDictionary]) {
+    $result = @{}
+    foreach ($key in $Value.Keys) {
+      $result[$key] = Convert-ToPlainObject -Value $Value[$key]
+    }
+    return $result
+  }
+
+  if (($Value -is [System.Collections.IEnumerable]) -and -not ($Value -is [string])) {
+    $list = @()
+    foreach ($item in $Value) {
+      $list += ,(Convert-ToPlainObject -Value $item)
+    }
+    return $list
+  }
+
+  return $Value
+}
+
+function Rewrite-RelativeDocLink {
+  param(
+    [string]$Link,
+    [string]$RelativeRoot
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Link)) {
+    return $Link
+  }
+
+  if ($Link -match '^(?:[a-z]+:)?//' -or $Link.StartsWith("#") -or $Link.StartsWith("?")) {
+    return $Link
+  }
+
+  $parts = $Link -split '#', 2
+  $pathPart = $parts[0]
+  $hashPart = if ($parts.Count -gt 1) { "#" + $parts[1] } else { "" }
+
+  if ([string]::IsNullOrWhiteSpace($pathPart)) {
+    return $Link
+  }
+
+  if ($pathPart.StartsWith("/")) {
+    return $Link
+  }
+
+  $joined = if ([string]::IsNullOrWhiteSpace($RelativeRoot)) {
+    $pathPart
+  } else {
+    ($RelativeRoot.TrimEnd("/") + "/" + $pathPart.TrimStart("/"))
+  }
+
+  return ($joined -replace "\\", "/") + $hashPart
+}
+
+function Update-MetadataFile {
+  param(
+    [string]$MetadataPath,
+    [string]$RelativeRoot
+  )
+
+  $metadata = Convert-ToPlainObject -Value (Read-JsonMap -Path $MetadataPath)
+
+  $relativeRoot = ($RelativeRoot -replace "\\", "/").Trim("/")
+  $pathToRoot = if ([string]::IsNullOrWhiteSpace($relativeRoot)) { "." } else { (($relativeRoot -split "/") | ForEach-Object { ".." }) -join "/" }
+
+  $oldWebpages = Get-MapValue -Map $metadata -Key "webpages" -Default @{}
+  $newWebpages = [ordered]@{}
+
+  foreach ($key in $oldWebpages.Keys) {
+    $page = Convert-ToPlainObject -Value $oldWebpages[$key]
+    $newKey = if ([string]::IsNullOrWhiteSpace($relativeRoot)) { $key } else { ($relativeRoot + "/" + $key) }
+
+    if ($page.ContainsKey("links")) {
+      $page["links"] = @(
+        $page["links"] | ForEach-Object {
+          Rewrite-RelativeDocLink -Link ([string]$_) -RelativeRoot $relativeRoot
+        }
+      )
+    }
+
+    if ($page.ContainsKey("backlinks")) {
+      $page["backlinks"] = @(
+        $page["backlinks"] | ForEach-Object {
+          Rewrite-RelativeDocLink -Link ([string]$_) -RelativeRoot $relativeRoot
+        }
+      )
+    }
+
+    if ($page.ContainsKey("fullURL")) {
+      $page["fullURL"] = $newKey
+    }
+
+    if ($page.ContainsKey("exportPath")) {
+      $page["exportPath"] = $newKey
+    }
+
+    if ($page.ContainsKey("pathToRoot")) {
+      $page["pathToRoot"] = $pathToRoot
+    }
+
+    $newWebpages[$newKey] = $page
+  }
+
+  $metadata["webpages"] = $newWebpages
+
+  $oldFileInfo = Get-MapValue -Map $metadata -Key "fileInfo" -Default @{}
+  $newFileInfo = [ordered]@{}
+
+  foreach ($key in $oldFileInfo.Keys) {
+    $info = Convert-ToPlainObject -Value $oldFileInfo[$key]
+
+    $newKey = if ($key -match '\.html($|#|\?)' -and -not [string]::IsNullOrWhiteSpace($relativeRoot)) {
+      ($relativeRoot + "/" + $key)
+    } else {
+      $key
+    }
+
+    if ($info.ContainsKey("exportPath") -and $info["exportPath"] -match '\.html$' -and -not [string]::IsNullOrWhiteSpace($relativeRoot)) {
+      $info["exportPath"] = ($relativeRoot + "/" + $info["exportPath"])
+    }
+
+    if ($info.ContainsKey("backlinks")) {
+      $info["backlinks"] = @(
+        $info["backlinks"] | ForEach-Object {
+          Rewrite-RelativeDocLink -Link ([string]$_) -RelativeRoot $relativeRoot
+        }
+      )
+    }
+
+    $newFileInfo[$newKey] = $info
+  }
+
+  $metadata["fileInfo"] = $newFileInfo
+
+  if ($metadata.ContainsKey("shownInTree")) {
+    $metadata["shownInTree"] = @(
+      $metadata["shownInTree"] | ForEach-Object {
+        Rewrite-RelativeDocLink -Link ([string]$_) -RelativeRoot $relativeRoot
+      }
+    )
+  }
+
+  if ($metadata.ContainsKey("allFiles")) {
+    $metadata["allFiles"] = @(
+      $metadata["allFiles"] | ForEach-Object {
+        $item = [string]$_
+        if ($item -match '\.html$' -and -not [string]::IsNullOrWhiteSpace($relativeRoot)) {
+          ($relativeRoot + "/" + $item)
+        } else {
+          $item
+        }
+      }
+    )
+  }
+
+  if ($metadata.ContainsKey("sourceToTarget")) {
+    $oldSourceToTarget = Get-MapValue -Map $metadata -Key "sourceToTarget" -Default @{}
+    $newSourceToTarget = [ordered]@{}
+
+    foreach ($sourceKey in $oldSourceToTarget.Keys) {
+      $targetValue = [string]$oldSourceToTarget[$sourceKey]
+      if ($targetValue -match '\.html$' -and -not [string]::IsNullOrWhiteSpace($relativeRoot)) {
+        $newSourceToTarget[$sourceKey] = ($relativeRoot + "/" + $targetValue)
+      } else {
+        $newSourceToTarget[$sourceKey] = $targetValue
+      }
+    }
+
+    $metadata["sourceToTarget"] = $newSourceToTarget
+  }
+
+  $json = $metadata | ConvertTo-Json -Depth 100
+  Write-Utf8NoBom -Path $MetadataPath -Content ($json + [Environment]::NewLine)
+}
+
 function Update-PageHtml {
   param(
     [string]$PagePath,
@@ -104,34 +288,19 @@ function Update-PageHtml {
   )
 
   $content = [System.IO.File]::ReadAllText($PagePath, [System.Text.Encoding]::UTF8)
-
   $relativePagePath = ($RelativePagePath -replace "\\", "/")
-  $baseHref = "./"
 
   $content = [System.Text.RegularExpressions.Regex]::Replace(
     $content,
-    '<base\s+href="[^"]*"\s*/?>',
-    '<base href="' + $baseHref + '">'
+    '<meta\s+name="pathname"\s+content="[^"]*"\s*/?>',
+    ('<meta name="pathname" content="' + $relativePagePath + '">')
   )
 
-  if ($content -match '<meta\s+name="pathname"\s+content="[^"]*"\s*/?>') {
-    $content = [System.Text.RegularExpressions.Regex]::Replace(
-      $content,
-      '<meta\s+name="pathname"\s+content="[^"]*"\s*/?>',
-      '<meta name="pathname" content="' + $relativePagePath + '">'
-    )
-  }
-  else {
-    $content = $content -replace '<head>', ('<head>' + [Environment]::NewLine + '<meta name="pathname" content="' + $relativePagePath + '">')
-  }
-
-  if ($content -match '<meta\s+property="og:url"\s+content="[^"]*"\s*/?>') {
-    $content = [System.Text.RegularExpressions.Regex]::Replace(
-      $content,
-      '<meta\s+property="og:url"\s+content="[^"]*"\s*/?>',
-      '<meta property="og:url" content="' + $relativePagePath + '">'
-    )
-  }
+  $content = [System.Text.RegularExpressions.Regex]::Replace(
+    $content,
+    '<meta\s+property="og:url"\s+content="[^"]*"\s*/?>',
+    ('<meta property="og:url" content="' + $relativePagePath + '">')
+  )
 
   $injection = '<!-- vault-wrapper:start --><script defer src="' + $RootRelativePrefix + '/assets/wrapper.js" data-wrapper-root="' + $RootRelativePrefix + '"></script><!-- vault-wrapper:end -->'
 
@@ -227,6 +396,8 @@ foreach ($metadataFile in $metadataFiles) {
     pageCount = @($pageSummary).Count
     pages = $pageSummary
   }
+
+  Update-MetadataFile -MetadataPath $metadataFile.FullName -RelativeRoot $relativeRoot
 }
 
 $sites = @(
