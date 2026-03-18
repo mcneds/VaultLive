@@ -19,6 +19,14 @@
 
   var repoRootUrl = getRepoRootUrl(root);
   var isDirectoryPage = !!directory;
+  var looksLikeExportedSite =
+    !!document.querySelector(".obsidian-document") ||
+    !!document.querySelector("#main-horizontal") ||
+    !!document.querySelector("#center-content");
+
+  if (!isDirectoryPage && !looksLikeExportedSite) {
+    return;
+  }
 
   if (!isDirectoryPage) {
     ensureStylesheet();
@@ -49,7 +57,6 @@
     if (!value || value === "." || value === "./") {
       return ".";
     }
-
     return String(value).replace(/\\/g, "/").replace(/\/+$/, "");
   }
 

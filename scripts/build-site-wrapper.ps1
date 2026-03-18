@@ -90,6 +90,81 @@ function Write-Utf8NoBom {
   [System.IO.File]::WriteAllText($Path, $Content, $encoding)
 }
 
+function Escape-RegexReplacement {
+  param([string]$Value)
+
+  return $Value.Replace('\', '\\').Replace('$', '$$')
+}
+
+function Normalize-ExportedPageHtml {
+  param(
+    [string]$PagePath,
+    [string]$RelativePagePath,
+    [string]$RootRelativePrefix
+  )
+
+  if (-not (Test-Path $PagePath)) {
+    Write-Warning "Skipping missing page: $PagePath"
+    return
+  }
+
+  $content = [System.IO.File]::ReadAllText($PagePath, [System.Text.Encoding]::UTF8)
+  $relativePagePath = ($RelativePagePath -replace "\\", "/")
+  $escapedRelativePagePath = Escape-RegexReplacement $relativePagePath
+
+  # Keep Obsidian assets relative to the exported page folder.
+  if ($content -match '<base\s+href="[^"]*"\s*/?>') {
+    $content = [System.Text.RegularExpressions.Regex]::Replace(
+      $content,
+      '<base\s+href="[^"]*"\s*/?>',
+      '<base href=".">'
+    )
+  }
+
+  # Make page identity folder-aware.
+  if ($content -match '<meta\s+name="pathname"\s+content="[^"]*"\s*/?>') {
+    $content = [System.Text.RegularExpressions.Regex]::Replace(
+      $content,
+      '<meta\s+name="pathname"\s+content="[^"]*"\s*/?>',
+      '<meta name="pathname" content="' + $escapedRelativePagePath + '">'
+    )
+  } else {
+    $content = $content -replace '<head>', ('<head>' + [Environment]::NewLine + '<meta name="pathname" content="' + $relativePagePath + '">')
+  }
+
+  if ($content -match '<meta\s+property="og:url"\s+content="[^"]*"\s*/?>') {
+    $content = [System.Text.RegularExpressions.Regex]::Replace(
+      $content,
+      '<meta\s+property="og:url"\s+content="[^"]*"\s*/?>',
+      '<meta property="og:url" content="' + $escapedRelativePagePath + '">'
+    )
+  }
+
+  # Rewrite only document self-links / same-page links from bare filename to repo-relative page path.
+  $escapedFileName = [Regex]::Escape(([System.IO.Path]::GetFileName($relativePagePath)))
+
+  $content = [System.Text.RegularExpressions.Regex]::Replace(
+    $content,
+    '(?<attr>\b(?:href|data-href|content)=")' + $escapedFileName + '(?<suffix>(?:#[^"]*)?)"',
+    '${attr}' + $escapedRelativePagePath + '${suffix}"'
+  )
+
+  # Update wrapper injection.
+  $injection = '<!-- vault-wrapper:start --><script defer src="' + $RootRelativePrefix + '/assets/wrapper.js" data-wrapper-root="' + $RootRelativePrefix + '"></script><!-- vault-wrapper:end -->'
+
+  if ($content -match '(?s)<!-- vault-wrapper:start -->.*?<!-- vault-wrapper:end -->') {
+    $content = $content -replace '(?s)<!-- vault-wrapper:start -->.*?<!-- vault-wrapper:end -->', $injection
+  }
+  elseif ($content -match '</body>') {
+    $content = $content -replace '</body>', ($injection + '</body>')
+  }
+  else {
+    $content += $injection
+  }
+
+  Write-Utf8NoBom -Path $PagePath -Content $content
+}
+
 $rootPath = [System.IO.Path]::GetFullPath($RootDir)
 $metadataFiles = Get-ChildItem -Path $rootPath -Recurse -Filter metadata.json | Where-Object { $_.FullName -match "[\\/]site-lib[\\/]metadata\.json$" }
 $sites = @()
@@ -111,16 +186,22 @@ foreach ($metadataFile in $metadataFiles) {
 
   foreach ($property in $webpages.GetEnumerator()) {
     $page = $property.Value
+    $fileKey = [string]$property.Key
+
+    if ($fileKey -notmatch '\.html$') {
+      continue
+    }
+
     $relativePagePath = if ([string]::IsNullOrWhiteSpace($relativeRoot)) {
-      [string]$property.Key
+      $fileKey
     }
     else {
-      ($relativeRoot.TrimEnd("/") + "/" + [string]$property.Key)
+      ($relativeRoot.TrimEnd("/") + "/" + $fileKey)
     }
 
     $pages += [PSCustomObject]@{
-      file       = [string]$property.Key
-      title      = if (Get-MapValue -Map $page -Key "title") { [string](Get-MapValue -Map $page -Key "title") } else { [string]$property.Key }
+      file       = $fileKey
+      title      = if (Get-MapValue -Map $page -Key "title") { [string](Get-MapValue -Map $page -Key "title") } else { $fileKey }
       path       = $relativePagePath
       showInTree = [bool](Get-MapValue -Map $page -Key "showInTree" -Default $false)
       treeOrder  = if ($null -ne (Get-MapValue -Map $page -Key "treeOrder")) { [int](Get-MapValue -Map $page -Key "treeOrder") } else { 999999 }
@@ -191,27 +272,8 @@ Write-Utf8NoBom -Path $manifestPath -Content (($manifest | ConvertTo-Json -Depth
 foreach ($site in $sites) {
   foreach ($page in $site.pages) {
     $pagePath = Join-Path $rootPath ($page.path -replace "/", "\")
-
-    if (-not (Test-Path $pagePath)) {
-      Write-Warning "Skipping missing page: $pagePath"
-      continue
-    }
-
     $rootRelative = Get-RootRelativePrefix -RelativeFilePath $page.path
-    $injection = "<!-- vault-wrapper:start --><script defer src=""$rootRelative/assets/wrapper.js"" data-wrapper-root=""$rootRelative""></script><!-- vault-wrapper:end -->"
-    $content = [System.IO.File]::ReadAllText($pagePath, [System.Text.Encoding]::UTF8)
-
-    if ($content -match "(?s)<!-- vault-wrapper:start -->.*?<!-- vault-wrapper:end -->") {
-      $content = $content -replace "(?s)<!-- vault-wrapper:start -->.*?<!-- vault-wrapper:end -->", $injection
-    }
-    elseif ($content -match "</body>") {
-      $content = $content -replace "</body>", ($injection + "</body>")
-    }
-    else {
-      $content += $injection
-    }
-
-    Write-Utf8NoBom -Path $pagePath -Content $content
+    Normalize-ExportedPageHtml -PagePath $pagePath -RelativePagePath $page.path -RootRelativePrefix $rootRelative
   }
 }
 
