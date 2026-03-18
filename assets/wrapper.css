@@ -1,0 +1,400 @@
+body.vault-wrapper-home {
+  margin: 0;
+  min-height: 100vh;
+  color: #1f2933;
+  background:
+    radial-gradient(circle at top left, rgba(204, 156, 76, 0.18), transparent 30rem),
+    radial-gradient(circle at top right, rgba(39, 111, 117, 0.18), transparent 28rem),
+    linear-gradient(180deg, #f5f0e6 0%, #efe6d8 45%, #ece4db 100%);
+  font-family: "Avenir Next", "Trebuchet MS", sans-serif;
+}
+
+.vault-wrapper-shell {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 4rem;
+}
+
+.vault-wrapper-hero {
+  position: relative;
+  overflow: hidden;
+  padding: 2rem;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  border-radius: 1.75rem;
+  background: rgba(255, 252, 246, 0.72);
+  box-shadow: 0 1.25rem 3rem rgba(71, 62, 51, 0.08);
+  backdrop-filter: blur(16px);
+}
+
+.vault-wrapper-hero::after {
+  content: "";
+  position: absolute;
+  inset: auto -6rem -8rem auto;
+  width: 18rem;
+  height: 18rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(39, 111, 117, 0.2), rgba(204, 156, 76, 0.2));
+  filter: blur(1rem);
+  pointer-events: none;
+}
+
+.vault-wrapper-kicker,
+.vault-wrapper-group-label,
+.vault-wrapper-card-count,
+.vault-wrapper-site-collection,
+.vault-wrapper-site-label {
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+}
+
+.vault-wrapper-kicker {
+  margin: 0 0 0.75rem;
+  color: #276f75;
+  font-weight: 700;
+}
+
+.vault-wrapper-hero h1,
+.vault-wrapper-group h2,
+.vault-wrapper-empty h2 {
+  margin: 0;
+  color: #16202a;
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, serif;
+  font-weight: 700;
+}
+
+.vault-wrapper-hero h1 {
+  max-width: 14ch;
+  font-size: clamp(2.4rem, 5vw, 4.5rem);
+  line-height: 0.94;
+}
+
+.vault-wrapper-intro {
+  max-width: 42rem;
+  margin: 1.1rem 0 0;
+  color: rgba(31, 41, 51, 0.82);
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.vault-wrapper-toolbar {
+  display: flex;
+  gap: 1rem;
+  align-items: end;
+  justify-content: space-between;
+  margin-top: 1.75rem;
+  flex-wrap: wrap;
+}
+
+.vault-wrapper-search {
+  display: grid;
+  gap: 0.55rem;
+  flex: 1 1 20rem;
+}
+
+.vault-wrapper-search-label {
+  font-size: 0.8rem;
+  color: rgba(31, 41, 51, 0.72);
+}
+
+.vault-wrapper-search input {
+  width: 100%;
+  padding: 0.95rem 1rem;
+  border: 1px solid rgba(31, 41, 51, 0.12);
+  border-radius: 999px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  font: inherit;
+}
+
+.vault-wrapper-search input:focus {
+  outline: 2px solid rgba(39, 111, 117, 0.24);
+  outline-offset: 2px;
+}
+
+.vault-wrapper-meta {
+  display: grid;
+  gap: 0.2rem;
+  justify-items: end;
+  min-width: 13rem;
+  color: rgba(31, 41, 51, 0.68);
+  font-size: 0.86rem;
+}
+
+.vault-wrapper-directory {
+  display: grid;
+  gap: 1.5rem;
+  margin-top: 1.75rem;
+}
+
+.vault-wrapper-group {
+  display: grid;
+  gap: 0.9rem;
+  animation: vault-wrapper-rise 320ms ease both;
+}
+
+.vault-wrapper-group-header {
+  display: flex;
+  gap: 0.8rem;
+  justify-content: space-between;
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.vault-wrapper-group h2 {
+  font-size: 1.45rem;
+}
+
+.vault-wrapper-group-label {
+  color: rgba(31, 41, 51, 0.55);
+  font-weight: 700;
+}
+
+.vault-wrapper-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 1rem;
+}
+
+.vault-wrapper-card {
+  display: grid;
+  gap: 0.8rem;
+  padding: 1.15rem;
+  border: 1px solid rgba(31, 41, 51, 0.09);
+  border-radius: 1.35rem;
+  background: rgba(255, 252, 247, 0.84);
+  box-shadow: 0 0.9rem 2rem rgba(71, 62, 51, 0.05);
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.vault-wrapper-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(39, 111, 117, 0.22);
+  box-shadow: 0 1.2rem 2.4rem rgba(71, 62, 51, 0.09);
+}
+
+.vault-wrapper-card-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: rgba(31, 41, 51, 0.62);
+}
+
+.vault-wrapper-card h3 {
+  margin: 0;
+  color: #16202a;
+  font-size: 1.2rem;
+}
+
+.vault-wrapper-card-subtitle {
+  margin: -0.25rem 0 0;
+  color: #276f75;
+  font-size: 0.95rem;
+}
+
+.vault-wrapper-card-description {
+  margin: 0;
+  color: rgba(31, 41, 51, 0.78);
+  line-height: 1.6;
+}
+
+.vault-wrapper-card-link,
+.vault-wrapper-home-link,
+.vault-wrapper-site-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  width: fit-content;
+  min-height: 2.5rem;
+  padding: 0.7rem 1rem;
+  border-radius: 999px;
+  text-decoration: none;
+  transition: transform 180ms ease, background-color 180ms ease, color 180ms ease;
+}
+
+.vault-wrapper-card-link,
+.vault-wrapper-home-link {
+  color: #f7f8f8;
+  background: #193642;
+}
+
+.vault-wrapper-card-link:hover,
+.vault-wrapper-home-link:hover {
+  transform: translateY(-1px);
+  background: #276f75;
+}
+
+.vault-wrapper-empty {
+  padding: 1.75rem;
+  border: 1px dashed rgba(31, 41, 51, 0.16);
+  border-radius: 1.5rem;
+  background: rgba(255, 252, 246, 0.64);
+}
+
+.vault-wrapper-empty p {
+  margin: 0.6rem 0 0;
+  color: rgba(31, 41, 51, 0.7);
+  line-height: 1.6;
+}
+
+.vault-wrapper-switcher {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 2147483646;
+  display: grid;
+  justify-items: end;
+  gap: 0.7rem;
+  font-family: "Avenir Next", "Trebuchet MS", sans-serif;
+}
+
+.vault-wrapper-toggle {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 999px;
+  padding: 0.65rem 0.95rem;
+  color: #eff5f4;
+  background: rgba(22, 32, 42, 0.88);
+  box-shadow: 0 1rem 2.3rem rgba(15, 23, 42, 0.22);
+  cursor: pointer;
+  font: inherit;
+}
+
+.vault-wrapper-toggle:hover,
+.vault-wrapper-toggle:focus-visible {
+  background: rgba(39, 111, 117, 0.92);
+  outline: none;
+}
+
+.vault-wrapper-panel {
+  width: min(21rem, calc(100vw - 2rem));
+  max-height: min(75vh, 34rem);
+  overflow: auto;
+  padding: 1rem;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 1.25rem;
+  color: #16202a;
+  background: rgba(250, 248, 243, 0.94);
+  box-shadow: 0 1.25rem 2.5rem rgba(15, 23, 42, 0.18);
+  backdrop-filter: blur(14px);
+  opacity: 0;
+  transform: translateY(-0.35rem);
+  pointer-events: none;
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.vault-wrapper-switcher[data-open="true"] .vault-wrapper-panel {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.vault-wrapper-panel-header {
+  display: grid;
+  gap: 0.3rem;
+  margin-bottom: 0.9rem;
+}
+
+.vault-wrapper-panel-title {
+  margin: 0;
+  color: #16202a;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.vault-wrapper-panel-copy {
+  margin: 0;
+  color: rgba(31, 41, 51, 0.7);
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.vault-wrapper-home-link {
+  width: 100%;
+  margin-bottom: 0.9rem;
+}
+
+.vault-wrapper-site-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.vault-wrapper-site-link {
+  width: 100%;
+  justify-content: space-between;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  color: #16202a;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.vault-wrapper-site-link:hover,
+.vault-wrapper-site-link:focus-visible {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.92);
+  outline: none;
+}
+
+.vault-wrapper-site-link.is-current {
+  border-color: rgba(39, 111, 117, 0.22);
+  background: rgba(39, 111, 117, 0.11);
+}
+
+.vault-wrapper-site-copy {
+  display: grid;
+  gap: 0.2rem;
+  text-align: left;
+}
+
+.vault-wrapper-site-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.vault-wrapper-site-collection,
+.vault-wrapper-site-label {
+  color: rgba(31, 41, 51, 0.55);
+  font-weight: 700;
+}
+
+.vault-wrapper-site-label {
+  letter-spacing: 0.08em;
+}
+
+@keyframes vault-wrapper-rise {
+  from {
+    opacity: 0;
+    transform: translateY(0.65rem);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 720px) {
+  .vault-wrapper-shell {
+    padding: 1.25rem 0.9rem 2.5rem;
+  }
+
+  .vault-wrapper-hero {
+    padding: 1.25rem;
+  }
+
+  .vault-wrapper-hero h1 {
+    max-width: none;
+    font-size: clamp(2rem, 11vw, 3.2rem);
+  }
+
+  .vault-wrapper-meta {
+    justify-items: start;
+    min-width: auto;
+  }
+
+  .vault-wrapper-switcher {
+    top: auto;
+    right: 0.75rem;
+    bottom: 0.75rem;
+  }
+}

@@ -1,0 +1,23 @@
+{
+    "generatedAt":  "2026-03-17T17:10:29.3196109-07:00",
+    "siteCount":  1,
+    "sites":  [
+                  {
+                      "id":  "baja-business-project",
+                      "name":  "Business Project",
+                      "collection":  "Baja",
+                      "root":  "Baja/Business Project",
+                      "entry":  "Baja/Business Project/manufacturing-implementation-plan.html",
+                      "pageTitle":  "Manufacturing Implementation Plan",
+                      "description":  "Background info (full) **2025 PRESENTATION SCENARIO/PROMPT:**For 2026, Baja SAE will use the following Business Presentation prompt: Outdoor Adventure Holdings is a property man...",
+                      "pageCount":  1,
+                      "pages":  [
+                                    {
+                                        "title":  "Manufacturing Implementation Plan",
+                                        "path":  "Baja/Business Project/manufacturing-implementation-plan.html",
+                                        "showInTree":  true
+                                    }
+                                ]
+                  }
+              ]
+}
