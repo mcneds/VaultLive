@@ -5,8 +5,28 @@
   var searchInput = document.getElementById("site-search");
   var siteCount = document.getElementById("site-count");
   var siteUpdated = document.getElementById("site-updated");
-  var bootstrapScript = document.currentScript || document.querySelector("script[data-wrapper-root][src*='wrapper.js']");
-  var root = normalizeRoot(directory ? "." : bootstrapScript && bootstrapScript.dataset.wrapperRoot ? bootstrapScript.dataset.wrapperRoot : ".");
+  var bootstrapScript =
+    document.currentScript ||
+    document.querySelector("script[data-wrapper-root][src*='wrapper.js']");
+
+  var root = normalizeRoot(
+    directory
+      ? "."
+      : bootstrapScript && bootstrapScript.dataset.wrapperRoot
+        ? bootstrapScript.dataset.wrapperRoot
+        : "."
+  );
+
+  var looksLikeExportedSite =
+    !!document.querySelector(".obsidian-document") ||
+    !!document.querySelector("#main-horizontal") ||
+    !!document.querySelector("#center-content");
+
+  var isDirectoryPage = !!directory;
+
+  if (!isDirectoryPage && !looksLikeExportedSite) {
+    return;
+  }
 
   if (!directory) {
     ensureStylesheet(root);
@@ -39,11 +59,28 @@
       return ".";
     }
 
-    return value.replace(/\/+$/, "");
+    return String(value).replace(/\\/g, "/").replace(/\/+$/, "");
+  }
+
+  function toAbsoluteUrl(baseRoot, relativePath) {
+    var cleanedPath = String(relativePath || "")
+      .replace(/^\/+/, "")
+      .replace(/\\/g, "/");
+
+    var baseHref;
+
+    if (baseRoot === ".") {
+      baseHref = "./";
+    } else {
+      baseHref = baseRoot + "/";
+    }
+
+    return new URL(cleanedPath || "", baseHref, window.location.href);
   }
 
   function fetchManifest(baseRoot) {
-    return fetch(resolveHref(baseRoot, "site-index.json"), { cache: "no-store" }).then(function (response) {
+    var manifestUrl = toAbsoluteUrl(baseRoot, "site-index.json");
+    return fetch(manifestUrl.href, { cache: "no-store" }).then(function (response) {
       if (!response.ok) {
         throw new Error("Manifest request failed with status " + response.status + ".");
       }
@@ -59,19 +96,20 @@
 
     var link = document.createElement("link");
     link.rel = "stylesheet";
-    link.href = resolveHref(baseRoot, "assets/wrapper.css");
+    link.href = toAbsoluteUrl(baseRoot, "assets/wrapper.css").href;
     link.dataset.vaultWrapperStyle = "true";
     document.head.appendChild(link);
   }
 
   function resolveHref(baseRoot, relativePath) {
-    var cleanedPath = String(relativePath || "").replace(/^\/+/, "").replace(/\\/g, "/");
+    return toAbsoluteUrl(baseRoot, relativePath).href;
+  }
 
-    if (!cleanedPath) {
-      return baseRoot === "." ? "./" : encodeURI(baseRoot + "/");
-    }
-
-    return baseRoot === "." ? encodeURI(cleanedPath) : encodeURI(baseRoot + "/" + cleanedPath);
+  function normalizePathname(pathname) {
+    return decodeURIComponent(String(pathname || ""))
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "");
   }
 
   function formatCount(value, noun) {
@@ -259,9 +297,16 @@
       return;
     }
 
-    var currentPath = decodeURI(window.location.pathname || "").replace(/^\/+/, "");
+    var currentPath = normalizePathname(window.location.pathname);
     var currentSite = sites.find(function (site) {
-      return currentPath === site.entry || currentPath.endsWith("/" + site.entry) || currentPath.indexOf(site.root + "/") !== -1;
+      var entryPath = normalizePathname(site.entry);
+      var rootPath = normalizePathname(site.root);
+
+      return (
+        currentPath === entryPath ||
+        currentPath.endsWith("/" + entryPath) ||
+        (rootPath && (currentPath === rootPath || currentPath.indexOf(rootPath + "/") !== -1))
+      );
     }) || null;
 
     var switcher = document.createElement("div");

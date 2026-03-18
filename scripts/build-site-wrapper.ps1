@@ -96,6 +96,58 @@ function Write-Utf8NoBom {
   [System.IO.File]::WriteAllText($Path, $Content, $encoding)
 }
 
+function Update-PageHtml {
+  param(
+    [string]$PagePath,
+    [string]$RelativePagePath,
+    [string]$RootRelativePrefix
+  )
+
+  $content = [System.IO.File]::ReadAllText($PagePath, [System.Text.Encoding]::UTF8)
+
+  $relativePagePath = ($RelativePagePath -replace "\\", "/")
+  $baseHref = "./"
+
+  $content = [System.Text.RegularExpressions.Regex]::Replace(
+    $content,
+    '<base\s+href="[^"]*"\s*/?>',
+    '<base href="' + $baseHref + '">'
+  )
+
+  if ($content -match '<meta\s+name="pathname"\s+content="[^"]*"\s*/?>') {
+    $content = [System.Text.RegularExpressions.Regex]::Replace(
+      $content,
+      '<meta\s+name="pathname"\s+content="[^"]*"\s*/?>',
+      '<meta name="pathname" content="' + $relativePagePath + '">'
+    )
+  }
+  else {
+    $content = $content -replace '<head>', ('<head>' + [Environment]::NewLine + '<meta name="pathname" content="' + $relativePagePath + '">')
+  }
+
+  if ($content -match '<meta\s+property="og:url"\s+content="[^"]*"\s*/?>') {
+    $content = [System.Text.RegularExpressions.Regex]::Replace(
+      $content,
+      '<meta\s+property="og:url"\s+content="[^"]*"\s*/?>',
+      '<meta property="og:url" content="' + $relativePagePath + '">'
+    )
+  }
+
+  $injection = '<!-- vault-wrapper:start --><script defer src="' + $RootRelativePrefix + '/assets/wrapper.js" data-wrapper-root="' + $RootRelativePrefix + '"></script><!-- vault-wrapper:end -->'
+
+  if ($content -match '(?s)<!-- vault-wrapper:start -->.*?<!-- vault-wrapper:end -->') {
+    $content = $content -replace '(?s)<!-- vault-wrapper:start -->.*?<!-- vault-wrapper:end -->', $injection
+  }
+  elseif ($content -match '</body>') {
+    $content = $content -replace '</body>', ($injection + '</body>')
+  }
+  else {
+    $content += $injection
+  }
+
+  Write-Utf8NoBom -Path $PagePath -Content $content
+}
+
 $rootPath = [System.IO.Path]::GetFullPath($RootDir)
 $metadataFiles = Get-ChildItem -Path $rootPath -Recurse -Filter metadata.json | Where-Object { $_.FullName -match "[\\/]site-lib[\\/]metadata\.json$" }
 $sites = @()
@@ -197,20 +249,7 @@ foreach ($site in $sites) {
   foreach ($page in $site.pages) {
     $pagePath = Join-Path $rootPath ($page.path -replace "/", "\")
     $rootRelative = Get-RootRelativePrefix -RelativeFilePath $page.path
-    $injection = "<!-- vault-wrapper:start --><script defer src=""$rootRelative/assets/wrapper.js"" data-wrapper-root=""$rootRelative""></script><!-- vault-wrapper:end -->"
-    $content = [System.IO.File]::ReadAllText($pagePath, [System.Text.Encoding]::UTF8)
-
-    if ($content -match "(?s)<!-- vault-wrapper:start -->.*?<!-- vault-wrapper:end -->") {
-      $content = $content -replace "(?s)<!-- vault-wrapper:start -->.*?<!-- vault-wrapper:end -->", $injection
-    }
-    elseif ($content -match "</body>") {
-      $content = $content -replace "</body>", ($injection + "</body>")
-    }
-    else {
-      $content += $injection
-    }
-
-    Write-Utf8NoBom -Path $pagePath -Content $content
+    Update-PageHtml -PagePath $pagePath -RelativePagePath $page.path -RootRelativePrefix $rootRelative
   }
 }
 
