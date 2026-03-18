@@ -4,38 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Vault Live</title>
-  <meta name="description" content="A lightweight directory for browsing static Obsidian exports.">
-  <base href="/">
-  <link rel="stylesheet" href="/assets/wrapper.css">
+  <meta name="description" content="A minimal shell for standalone Obsidian HTML exports.">
 </head>
-<body class="vault-wrapper-home">
-  <main class="vault-wrapper-shell">
-    <header class="vault-wrapper-hero">
-      <p class="vault-wrapper-kicker">Vault Live</p>
-      <h1>Browse exported sites without getting in their way.</h1>
-      <p class="vault-wrapper-intro">
-        This landing page stays quiet on purpose: pick a site, open it, and use the small switcher inside each export to hop back or move to another one.
-      </p>
-      <div class="vault-wrapper-toolbar">
-        <label class="vault-wrapper-search">
-          <span class="vault-wrapper-search-label">Search sites</span>
-          <input id="site-search" type="search" placeholder="Filter by folder, title, or topic">
-        </label>
-        <div class="vault-wrapper-meta">
-          <span id="site-count">Loading sites...</span>
-          <span id="site-updated">Waiting for manifest...</span>
-        </div>
-      </div>
-    </header>
-
-    <section id="site-directory" class="vault-wrapper-directory" aria-live="polite">
-      <div class="vault-wrapper-empty">
-        <h2>Loading the site directory</h2>
-        <p>The wrapper manifest is being read from this repo.</p>
-      </div>
-    </section>
-  </main>
-
+<body>
   <script defer src="/assets/wrapper.js"></script>
 </body>
 </html>

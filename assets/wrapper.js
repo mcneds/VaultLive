@@ -1,403 +1,467 @@
 (function () {
   "use strict";
 
-  var directory = document.getElementById("site-directory");
-  var searchInput = document.getElementById("site-search");
-  var siteCount = document.getElementById("site-count");
-  var siteUpdated = document.getElementById("site-updated");
-  var bootstrapScript =
-    document.currentScript ||
-    document.querySelector("script[data-wrapper-root][src*='wrapper.js']");
+  const state = {
+    manifest: null,
+    current: null
+  };
 
-  var root = normalizeRoot(
-    directory
-      ? "."
-      : bootstrapScript && bootstrapScript.dataset.wrapperRoot
-        ? bootstrapScript.dataset.wrapperRoot
-        : "."
-  );
+  init().catch((error) => {
+    console.error("VaultLive failed to initialize:", error);
+    document.body.innerHTML = `
+      <main style="padding:24px;font-family:Arial,sans-serif">
+        <h1>VaultLive failed to load</h1>
+        <p>${escapeHtml(error && error.message ? error.message : String(error))}</p>
+      </main>
+    `;
+  });
 
-  var repoRootUrl = getRepoRootUrl(root);
-  var isDirectoryPage = !!directory;
-  var looksLikeExportedSite =
-    !!document.querySelector(".obsidian-document") ||
-    !!document.querySelector("#main-horizontal") ||
-    !!document.querySelector("#center-content");
-
-  if (!isDirectoryPage && !looksLikeExportedSite) {
-    return;
+  async function init() {
+    state.manifest = await loadManifest();
+    mountShell();
+    window.addEventListener("popstate", renderFromUrl);
+    renderFromUrl();
   }
 
-  if (!isDirectoryPage) {
-    ensureStylesheet();
+  async function loadManifest() {
+    const response = await fetch("/site-index.json", { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error("Could not load site-index.json (" + response.status + ")");
+    }
+    return response.json();
   }
 
-  fetchManifest()
-    .then(function (manifest) {
-      if (isDirectoryPage) {
-        renderDirectory(manifest);
-      } else {
-        renderSwitcher(manifest);
-      }
-    })
-    .catch(function (error) {
-      console.error("Vault wrapper could not load the site manifest.", error);
+  function mountShell() {
+    document.title = "Vault Live";
+    document.body.innerHTML = `
+      <div class="vl-app">
+        <header class="vl-topbar">
+          <a class="vl-brand" href="/">VaultLive</a>
 
-      if (isDirectoryPage) {
-        directory.replaceChildren(
-          createEmptyState(
-            "The site directory could not be loaded.",
-            "Run scripts/build-site-wrapper.ps1 to regenerate site-index.json, then refresh the page."
-          )
-        );
-      }
+          <button id="vl-directory-btn" class="vl-btn" type="button">Directory</button>
+
+          <select id="vl-site-select" class="vl-select">
+            <option value="">Select export</option>
+          </select>
+
+          <div class="vl-grow"></div>
+
+          <div id="vl-current-label" class="vl-current-label"></div>
+
+          <a id="vl-open-raw" class="vl-btn" target="_blank" rel="noopener noreferrer">Open raw</a>
+        </header>
+
+        <main id="vl-root"></main>
+      </div>
+    `;
+
+    injectStyles();
+
+    const select = document.getElementById("vl-site-select");
+    const dirBtn = document.getElementById("vl-directory-btn");
+
+    getSites().forEach((site) => {
+      const option = document.createElement("option");
+      option.value = site.id;
+      option.textContent = site.name || site.pageTitle || site.entry || site.id;
+      select.appendChild(option);
     });
 
-  function normalizeRoot(value) {
-    if (!value || value === "." || value === "./") {
-      return ".";
-    }
-    return String(value).replace(/\\/g, "/").replace(/\/+$/, "");
-  }
+    select.addEventListener("change", () => {
+      const site = findSite(select.value);
+      if (!site) return;
+      goToSite(site);
+    });
 
-  function getRepoRootUrl(baseRoot) {
-    var pageUrl = new URL(window.location.href);
-
-    if (baseRoot === ".") {
-      return new URL("./", pageUrl);
-    }
-
-    return new URL(baseRoot.replace(/\/+$/, "") + "/", pageUrl);
-  }
-
-  function toRepoUrl(relativePath) {
-    var cleanedPath = String(relativePath || "")
-      .replace(/^\/+/, "")
-      .replace(/\\/g, "/");
-
-    return new URL(cleanedPath, repoRootUrl).href;
-  }
-
-  function fetchManifest() {
-    return fetch(toRepoUrl("site-index.json"), { cache: "no-store" }).then(function (response) {
-      if (!response.ok) {
-        throw new Error("Manifest request failed with status " + response.status + ".");
-      }
-
-      return response.json();
+    dirBtn.addEventListener("click", () => {
+      history.pushState({}, "", "/");
+      renderFromUrl();
     });
   }
 
-  function ensureStylesheet() {
-    if (document.querySelector("link[data-vault-wrapper-style='true']")) {
+  function renderFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const siteId = params.get("site");
+    const root = document.getElementById("vl-root");
+    const label = document.getElementById("vl-current-label");
+    const rawLink = document.getElementById("vl-open-raw");
+    const select = document.getElementById("vl-site-select");
+
+    if (!siteId) {
+      state.current = null;
+      select.value = "";
+      label.textContent = "Directory";
+      rawLink.href = "/";
+      rawLink.style.visibility = "hidden";
+      renderDirectory(root);
       return;
     }
 
-    var link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = toRepoUrl("assets/wrapper.css");
-    link.dataset.vaultWrapperStyle = "true";
-    document.head.appendChild(link);
-  }
-
-  function normalizePathname(pathname) {
-    return decodeURIComponent(String(pathname || ""))
-      .replace(/\\/g, "/")
-      .replace(/^\/+/, "")
-      .replace(/\/+$/, "");
-  }
-
-  function formatCount(value, noun) {
-    return value + " " + noun + (value === 1 ? "" : "s");
-  }
-
-  function toArray(value) {
-    if (Array.isArray(value)) {
-      return value.slice();
+    const site = findSite(siteId);
+    if (!site) {
+      state.current = null;
+      select.value = "";
+      label.textContent = "Directory";
+      rawLink.href = "/";
+      rawLink.style.visibility = "hidden";
+      renderDirectory(root, "That export was not found.");
+      return;
     }
 
-    if (value && typeof value === "object") {
-      return [value];
-    }
+    state.current = site;
+    select.value = site.id;
+    label.textContent = site.name || site.pageTitle || site.entry;
+    rawLink.href = "/" + stripLeadingSlash(site.entry);
+    rawLink.style.visibility = "visible";
 
-    return [];
+    renderViewer(root, site);
   }
 
-  function formatDate(value) {
-    var date = new Date(value);
+  function renderDirectory(root, message) {
+    const sites = getSites();
 
-    if (Number.isNaN(date.valueOf())) {
-      return "Manifest timestamp unavailable";
-    }
+    root.innerHTML = `
+      <section class="vl-directory">
+        <div class="vl-hero">
+          <h1>VaultLive</h1>
+          <p>Open standalone Obsidian HTML exports inside a minimal shell.</p>
+          <input id="vl-search" class="vl-search" type="search" placeholder="Search exports">
+        </div>
 
-    return new Intl.DateTimeFormat(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short"
-    }).format(date);
-  }
+        ${message ? `<div class="vl-message">${escapeHtml(message)}</div>` : ""}
 
-  function renderDirectory(manifest) {
-    var sites = toArray(manifest.sites);
-    var query = "";
+        <div id="vl-grid" class="vl-grid"></div>
+      </section>
+    `;
 
-    if (siteUpdated) {
-      siteUpdated.textContent = "Updated " + formatDate(manifest.generatedAt);
-    }
-
-    if (searchInput) {
-      searchInput.addEventListener("input", function () {
-        query = searchInput.value.trim().toLowerCase();
-        draw();
-      });
-    }
-
-    draw();
+    const search = document.getElementById("vl-search");
+    const grid = document.getElementById("vl-grid");
 
     function draw() {
-      var filtered = sites.filter(function (site) {
-        if (!query) {
-          return true;
-        }
-
-        return [
+      const q = (search.value || "").trim().toLowerCase();
+      const filtered = sites.filter((site) => {
+        const text = [
           site.name,
-          site.collection,
           site.pageTitle,
-          site.description
-        ].join(" ").toLowerCase().indexOf(query) !== -1;
+          site.description,
+          site.entry,
+          site.collection
+        ].join(" ").toLowerCase();
+        return !q || text.includes(q);
       });
 
-      if (siteCount) {
-        siteCount.textContent = formatCount(filtered.length, "site");
-      }
-
-      directory.replaceChildren();
+      grid.innerHTML = "";
 
       if (!filtered.length) {
-        directory.appendChild(
-          createEmptyState(
-            "No sites match that search.",
-            "Try another folder name, page title, or topic keyword."
-          )
-        );
+        grid.innerHTML = `
+          <article class="vl-card">
+            <h3>No matches</h3>
+            <p>Try another search term.</p>
+          </article>
+        `;
         return;
       }
 
-      var groups = new Map();
+      filtered.forEach((site) => {
+        const card = document.createElement("article");
+        card.className = "vl-card";
+        card.innerHTML = `
+          <div class="vl-card-meta">
+            <span>${escapeHtml(site.collection || "Export")}</span>
+            <span>single HTML</span>
+          </div>
+          <h3>${escapeHtml(site.name || site.pageTitle || site.id)}</h3>
+          <p>${escapeHtml(site.description || site.pageTitle || site.entry)}</p>
+          <div class="vl-card-actions">
+            <button class="vl-btn vl-btn-primary" type="button">Open in shell</button>
+            <a class="vl-btn" href="/${escapeAttr(stripLeadingSlash(site.entry))}" target="_blank" rel="noopener noreferrer">Open raw</a>
+          </div>
+        `;
 
-      filtered.forEach(function (site) {
-        var key = site.collection || "Root";
+        card.querySelector("button").addEventListener("click", () => goToSite(site));
+        grid.appendChild(card);
+      });
+    }
 
-        if (!groups.has(key)) {
-          groups.set(key, []);
+    search.addEventListener("input", draw);
+    draw();
+  }
+
+  function renderViewer(root, site) {
+    root.innerHTML = `
+      <section class="vl-view">
+        <iframe
+          id="vl-frame"
+          class="vl-frame"
+          src="/${escapeAttr(stripLeadingSlash(site.entry))}"
+          loading="eager"
+          referrerpolicy="strict-origin-when-cross-origin"
+        ></iframe>
+      </section>
+    `;
+
+    const frame = document.getElementById("vl-frame");
+
+    frame.addEventListener("load", () => {
+      try {
+        const title = frame.contentDocument && frame.contentDocument.title;
+        document.title = (title || site.name || "Vault Live") + " - Vault Live";
+      } catch (_) {
+        document.title = (site.name || "Vault Live") + " - Vault Live";
+      }
+    });
+  }
+
+  function goToSite(site) {
+    const url = new URL(window.location.href);
+    url.search = "";
+    url.searchParams.set("site", site.id);
+    history.pushState({}, "", url);
+    renderFromUrl();
+  }
+
+  function getSites() {
+    const sites = Array.isArray(state.manifest && state.manifest.sites)
+      ? state.manifest.sites.slice()
+      : [];
+
+    return sites.map((site) => ({
+      ...site,
+      entry: site.entry || inferEntry(site)
+    })).filter((site) => site.entry && /\.html?$/i.test(site.entry));
+  }
+
+  function inferEntry(site) {
+    if (site.entry) return site.entry;
+    if (Array.isArray(site.pages) && site.pages.length) {
+      return site.pages[0].path || "";
+    }
+    return "";
+  }
+
+  function findSite(id) {
+    return getSites().find((site) => site.id === id) || null;
+  }
+
+  function stripLeadingSlash(value) {
+    return String(value || "").replace(/^\/+/, "");
+  }
+
+  function escapeHtml(value) {
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function escapeAttr(value) {
+    return escapeHtml(value);
+  }
+
+  function injectStyles() {
+    if (document.getElementById("vl-inline-styles")) return;
+
+    const style = document.createElement("style");
+    style.id = "vl-inline-styles";
+    style.textContent = `
+      :root {
+        --vl-bg: #0f141a;
+        --vl-panel: rgba(20, 26, 34, 0.9);
+        --vl-card: rgba(255,255,255,0.04);
+        --vl-border: rgba(255,255,255,0.08);
+        --vl-text: #eef4f7;
+        --vl-muted: rgba(238,244,247,0.68);
+        --vl-accent: #295a64;
+        --vl-shadow: 0 18px 40px rgba(0,0,0,0.28);
+        --vl-topbar-h: 56px;
+      }
+
+      html, body {
+        margin: 0;
+        min-height: 100%;
+        background: var(--vl-bg);
+        color: var(--vl-text);
+        font-family: Inter, Arial, sans-serif;
+      }
+
+      .vl-topbar {
+        position: fixed;
+        inset: 0 0 auto 0;
+        z-index: 9999;
+        height: var(--vl-topbar-h);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 12px;
+        background: var(--vl-panel);
+        border-bottom: 1px solid var(--vl-border);
+        backdrop-filter: blur(12px);
+        box-shadow: var(--vl-shadow);
+      }
+
+      .vl-brand {
+        color: var(--vl-text);
+        text-decoration: none;
+        font-weight: 700;
+      }
+
+      .vl-btn,
+      .vl-select,
+      .vl-search {
+        height: 36px;
+        border-radius: 10px;
+        border: 1px solid var(--vl-border);
+        background: rgba(255,255,255,0.05);
+        color: var(--vl-text);
+        padding: 0 12px;
+        box-sizing: border-box;
+        font: inherit;
+      }
+
+      .vl-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        text-decoration: none;
+        cursor: pointer;
+      }
+
+      .vl-btn-primary {
+        background: var(--vl-accent);
+      }
+
+      .vl-grow {
+        flex: 1 1 auto;
+      }
+
+      .vl-current-label {
+        color: var(--vl-muted);
+        font-size: 0.92rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 28vw;
+      }
+
+      .vl-directory {
+        padding: calc(var(--vl-topbar-h) + 24px) 24px 24px;
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+
+      .vl-hero {
+        display: grid;
+        gap: 12px;
+        padding: 24px;
+        border: 1px solid var(--vl-border);
+        border-radius: 20px;
+        background: var(--vl-card);
+        box-shadow: var(--vl-shadow);
+        margin-bottom: 18px;
+      }
+
+      .vl-hero h1 {
+        margin: 0;
+        font-size: clamp(2rem, 4vw, 3.2rem);
+        line-height: 0.96;
+      }
+
+      .vl-hero p {
+        margin: 0;
+        color: var(--vl-muted);
+      }
+
+      .vl-search {
+        width: min(420px, 100%);
+      }
+
+      .vl-message {
+        padding: 14px 16px;
+        border: 1px solid var(--vl-border);
+        border-radius: 14px;
+        background: var(--vl-card);
+        margin-bottom: 18px;
+      }
+
+      .vl-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 14px;
+      }
+
+      .vl-card {
+        display: grid;
+        gap: 12px;
+        padding: 16px;
+        border: 1px solid var(--vl-border);
+        border-radius: 18px;
+        background: var(--vl-card);
+        box-shadow: var(--vl-shadow);
+      }
+
+      .vl-card h3,
+      .vl-card p {
+        margin: 0;
+      }
+
+      .vl-card p {
+        color: var(--vl-muted);
+        line-height: 1.5;
+      }
+
+      .vl-card-meta {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        color: var(--vl-muted);
+        font-size: 0.85rem;
+      }
+
+      .vl-card-actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .vl-view {
+        position: fixed;
+        inset: var(--vl-topbar-h) 0 0 0;
+        background: #111;
+      }
+
+      .vl-frame {
+        width: 100%;
+        height: 100%;
+        border: 0;
+        background: white;
+      }
+
+      @media (max-width: 760px) {
+        .vl-topbar {
+          flex-wrap: wrap;
+          height: auto;
+          min-height: var(--vl-topbar-h);
+          padding-top: 8px;
+          padding-bottom: 8px;
         }
 
-        groups.get(key).push(site);
-      });
+        .vl-current-label {
+          display: none;
+        }
 
-      groups.forEach(function (groupSites, groupName) {
-        directory.appendChild(createGroup(groupName, groupSites));
-      });
-    }
-  }
+        .vl-view {
+          top: 76px;
+        }
 
-  function createGroup(groupName, groupSites) {
-    var section = document.createElement("section");
-    section.className = "vault-wrapper-group";
-
-    var header = document.createElement("div");
-    header.className = "vault-wrapper-group-header";
-
-    var label = document.createElement("span");
-    label.className = "vault-wrapper-group-label";
-    label.textContent = groupName === "Root" ? "Top Level" : groupName;
-
-    var title = document.createElement("h2");
-    title.textContent = groupName === "Root" ? "Standalone sites" : groupName;
-
-    var count = document.createElement("span");
-    count.className = "vault-wrapper-card-count";
-    count.textContent = formatCount(groupSites.length, "site");
-
-    var headingCopy = document.createElement("div");
-    headingCopy.append(label, title);
-
-    header.append(headingCopy, count);
-    section.appendChild(header);
-
-    var grid = document.createElement("div");
-    grid.className = "vault-wrapper-grid";
-
-    groupSites.forEach(function (site) {
-      grid.appendChild(createSiteCard(site));
-    });
-
-    section.appendChild(grid);
-    return section;
-  }
-
-  function createSiteCard(site) {
-    var article = document.createElement("article");
-    article.className = "vault-wrapper-card";
-
-    var meta = document.createElement("div");
-    meta.className = "vault-wrapper-card-meta";
-
-    var collection = document.createElement("span");
-    collection.textContent = "Static export";
-
-    var count = document.createElement("span");
-    count.textContent = formatCount(site.pageCount || 0, "page");
-
-    meta.append(collection, count);
-
-    var heading = document.createElement("h3");
-    heading.textContent = site.name;
-
-    var subtitle = document.createElement("p");
-    subtitle.className = "vault-wrapper-card-subtitle";
-    subtitle.textContent = site.pageTitle || "Open the exported site";
-
-    var description = document.createElement("p");
-    description.className = "vault-wrapper-card-description";
-    description.textContent = site.description || "This export is ready to open.";
-
-    var link = document.createElement("a");
-    link.className = "vault-wrapper-card-link";
-    link.href = toRepoUrl(site.entry);
-    link.textContent = "Open site";
-
-    article.append(meta, heading, subtitle, description, link);
-    return article;
-  }
-
-  function createEmptyState(titleText, bodyText) {
-    var wrapper = document.createElement("div");
-    wrapper.className = "vault-wrapper-empty";
-
-    var title = document.createElement("h2");
-    title.textContent = titleText;
-
-    var body = document.createElement("p");
-    body.textContent = bodyText;
-
-    wrapper.append(title, body);
-    return wrapper;
-  }
-
-  function renderSwitcher(manifest) {
-    var sites = toArray(manifest.sites);
-
-    if (!sites.length || document.querySelector(".vault-wrapper-switcher")) {
-      return;
-    }
-
-    var currentPath = normalizePathname(window.location.pathname);
-
-    var currentSite = sites.find(function (site) {
-      var entryPath = normalizePathname(site.entry);
-      var rootPath = normalizePathname(site.root);
-
-      return (
-        currentPath === entryPath ||
-        currentPath.endsWith("/" + entryPath) ||
-        (rootPath && currentPath.indexOf(rootPath + "/") !== -1)
-      );
-    }) || null;
-
-    var switcher = document.createElement("div");
-    switcher.className = "vault-wrapper-switcher";
-    switcher.dataset.open = "false";
-
-    var toggle = document.createElement("button");
-    toggle.className = "vault-wrapper-toggle";
-    toggle.type = "button";
-    toggle.setAttribute("aria-expanded", "false");
-    toggle.textContent = currentSite ? "Sites: " + currentSite.name : "Sites";
-
-    var panel = document.createElement("aside");
-    panel.className = "vault-wrapper-panel";
-
-    var panelHeader = document.createElement("div");
-    panelHeader.className = "vault-wrapper-panel-header";
-
-    var panelTitle = document.createElement("h2");
-    panelTitle.className = "vault-wrapper-panel-title";
-    panelTitle.textContent = currentSite ? currentSite.name : "Site switcher";
-
-    var panelCopy = document.createElement("p");
-    panelCopy.className = "vault-wrapper-panel-copy";
-    panelCopy.textContent = currentSite
-      ? "Jump back to the directory or move across exported sites."
-      : "Open another exported site or return to the directory.";
-
-    panelHeader.append(panelTitle, panelCopy);
-
-    var homeLink = document.createElement("a");
-    homeLink.className = "vault-wrapper-home-link";
-    homeLink.href = repoRootUrl.href;
-    homeLink.textContent = "Back to directory";
-
-    var siteList = document.createElement("div");
-    siteList.className = "vault-wrapper-site-list";
-
-    sites.forEach(function (site) {
-      siteList.appendChild(createSwitcherLink(site, currentSite));
-    });
-
-    panel.append(panelHeader, homeLink, siteList);
-    switcher.append(toggle, panel);
-    document.body.appendChild(switcher);
-
-    toggle.addEventListener("click", function () {
-      var isOpen = switcher.dataset.open === "true";
-      switcher.dataset.open = isOpen ? "false" : "true";
-      toggle.setAttribute("aria-expanded", String(!isOpen));
-    });
-
-    document.addEventListener("click", function (event) {
-      if (!switcher.contains(event.target)) {
-        switcher.dataset.open = "false";
-        toggle.setAttribute("aria-expanded", "false");
+        .vl-directory {
+          padding-top: 100px;
+          padding-left: 14px;
+          padding-right: 14px;
+        }
       }
-    });
-
-    document.addEventListener("keydown", function (event) {
-      if (event.key === "Escape") {
-        switcher.dataset.open = "false";
-        toggle.setAttribute("aria-expanded", "false");
-      }
-    });
-  }
-
-  function createSwitcherLink(site, currentSite) {
-    var link = document.createElement("a");
-    var isCurrent = currentSite && currentSite.entry === site.entry;
-    link.className = "vault-wrapper-site-link" + (isCurrent ? " is-current" : "");
-    link.href = toRepoUrl(site.entry);
-
-    var copy = document.createElement("span");
-    copy.className = "vault-wrapper-site-copy";
-
-    var collection = document.createElement("span");
-    collection.className = "vault-wrapper-site-collection";
-    collection.textContent = site.collection || "Root";
-
-    var title = document.createElement("span");
-    title.className = "vault-wrapper-site-title";
-    title.textContent = site.name;
-
-    var subtitle = document.createElement("span");
-    subtitle.className = "vault-wrapper-panel-copy";
-    subtitle.textContent = site.pageTitle || "Open site";
-
-    copy.append(collection, title, subtitle);
-
-    var label = document.createElement("span");
-    label.className = "vault-wrapper-site-label";
-    label.textContent = isCurrent ? "Current" : "Visit";
-
-    link.append(copy, label);
-    return link;
+    `;
+    document.head.appendChild(style);
   }
 })();
