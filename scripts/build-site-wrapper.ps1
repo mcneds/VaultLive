@@ -7,9 +7,7 @@ $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Web.Extensions
 
 function Read-JsonMap {
-  param(
-    [string]$Path
-  )
+  param([string]$Path)
 
   $serializer = New-Object System.Web.Script.Serialization.JavaScriptSerializer
   $serializer.MaxJsonLength = [int]::MaxValue
@@ -48,9 +46,7 @@ function Get-PosixRelativePath {
 }
 
 function Get-RootRelativePrefix {
-  param(
-    [string]$RelativeFilePath
-  )
+  param([string]$RelativeFilePath)
 
   $directory = Split-Path $RelativeFilePath -Parent
 
@@ -68,9 +64,7 @@ function Get-RootRelativePrefix {
 }
 
 function Get-CleanSnippet {
-  param(
-    [string]$Text
-  )
+  param([string]$Text)
 
   if ([string]::IsNullOrWhiteSpace($Text)) {
     return ""
@@ -96,225 +90,24 @@ function Write-Utf8NoBom {
   [System.IO.File]::WriteAllText($Path, $Content, $encoding)
 }
 
-function Convert-ToPlainObject {
+function Normalize-RepoRelativePagePath {
   param(
-    $Value
+    [string]$RelativeRoot,
+    [string]$PageKey
   )
 
-  if ($null -eq $Value) {
-    return $null
+  $root = ($RelativeRoot -replace "\\", "/").Trim("/")
+  $key = ([string]$PageKey -replace "\\", "/").TrimStart("/")
+
+  if ([string]::IsNullOrWhiteSpace($root)) {
+    return $key
   }
 
-  if ($Value -is [System.Collections.IDictionary]) {
-    $result = @{}
-    foreach ($key in $Value.Keys) {
-      $result[$key] = Convert-ToPlainObject -Value $Value[$key]
-    }
-    return $result
+  if ($key -eq $root -or $key.StartsWith($root + "/")) {
+    return $key
   }
 
-  if (($Value -is [System.Collections.IEnumerable]) -and -not ($Value -is [string])) {
-    $list = @()
-    foreach ($item in $Value) {
-      $list += ,(Convert-ToPlainObject -Value $item)
-    }
-    return $list
-  }
-
-  return $Value
-}
-
-function Rewrite-RelativeDocLink {
-  param(
-    [string]$Link,
-    [string]$RelativeRoot
-  )
-
-  if ([string]::IsNullOrWhiteSpace($Link)) {
-    return $Link
-  }
-
-  if ($Link -match '^(?:[a-z]+:)?//' -or $Link.StartsWith("#") -or $Link.StartsWith("?")) {
-    return $Link
-  }
-
-  $parts = $Link -split '#', 2
-  $pathPart = $parts[0]
-  $hashPart = if ($parts.Count -gt 1) { "#" + $parts[1] } else { "" }
-
-  if ([string]::IsNullOrWhiteSpace($pathPart)) {
-    return $Link
-  }
-
-  if ($pathPart.StartsWith("/")) {
-    return $Link
-  }
-
-  $joined = if ([string]::IsNullOrWhiteSpace($RelativeRoot)) {
-    $pathPart
-  } else {
-    ($RelativeRoot.TrimEnd("/") + "/" + $pathPart.TrimStart("/"))
-  }
-
-  return ($joined -replace "\\", "/") + $hashPart
-}
-
-function Update-MetadataFile {
-  param(
-    [string]$MetadataPath,
-    [string]$RelativeRoot
-  )
-
-  $metadata = Convert-ToPlainObject -Value (Read-JsonMap -Path $MetadataPath)
-
-  $relativeRoot = ($RelativeRoot -replace "\\", "/").Trim("/")
-  $pathToRoot = if ([string]::IsNullOrWhiteSpace($relativeRoot)) { "." } else { (($relativeRoot -split "/") | ForEach-Object { ".." }) -join "/" }
-
-  $oldWebpages = Get-MapValue -Map $metadata -Key "webpages" -Default @{}
-  $newWebpages = [ordered]@{}
-
-  foreach ($key in $oldWebpages.Keys) {
-    $page = Convert-ToPlainObject -Value $oldWebpages[$key]
-    $newKey = if ([string]::IsNullOrWhiteSpace($relativeRoot)) { $key } else { ($relativeRoot + "/" + $key) }
-
-    if ($page.ContainsKey("links")) {
-      $page["links"] = @(
-        $page["links"] | ForEach-Object {
-          Rewrite-RelativeDocLink -Link ([string]$_) -RelativeRoot $relativeRoot
-        }
-      )
-    }
-
-    if ($page.ContainsKey("backlinks")) {
-      $page["backlinks"] = @(
-        $page["backlinks"] | ForEach-Object {
-          Rewrite-RelativeDocLink -Link ([string]$_) -RelativeRoot $relativeRoot
-        }
-      )
-    }
-
-    if ($page.ContainsKey("fullURL")) {
-      $page["fullURL"] = $newKey
-    }
-
-    if ($page.ContainsKey("exportPath")) {
-      $page["exportPath"] = $newKey
-    }
-
-    if ($page.ContainsKey("pathToRoot")) {
-      $page["pathToRoot"] = $pathToRoot
-    }
-
-    $newWebpages[$newKey] = $page
-  }
-
-  $metadata["webpages"] = $newWebpages
-
-  $oldFileInfo = Get-MapValue -Map $metadata -Key "fileInfo" -Default @{}
-  $newFileInfo = [ordered]@{}
-
-  foreach ($key in $oldFileInfo.Keys) {
-    $info = Convert-ToPlainObject -Value $oldFileInfo[$key]
-
-    $newKey = if ($key -match '\.html($|#|\?)' -and -not [string]::IsNullOrWhiteSpace($relativeRoot)) {
-      ($relativeRoot + "/" + $key)
-    } else {
-      $key
-    }
-
-    if ($info.ContainsKey("exportPath") -and $info["exportPath"] -match '\.html$' -and -not [string]::IsNullOrWhiteSpace($relativeRoot)) {
-      $info["exportPath"] = ($relativeRoot + "/" + $info["exportPath"])
-    }
-
-    if ($info.ContainsKey("backlinks")) {
-      $info["backlinks"] = @(
-        $info["backlinks"] | ForEach-Object {
-          Rewrite-RelativeDocLink -Link ([string]$_) -RelativeRoot $relativeRoot
-        }
-      )
-    }
-
-    $newFileInfo[$newKey] = $info
-  }
-
-  $metadata["fileInfo"] = $newFileInfo
-
-  if ($metadata.ContainsKey("shownInTree")) {
-    $metadata["shownInTree"] = @(
-      $metadata["shownInTree"] | ForEach-Object {
-        Rewrite-RelativeDocLink -Link ([string]$_) -RelativeRoot $relativeRoot
-      }
-    )
-  }
-
-  if ($metadata.ContainsKey("allFiles")) {
-    $metadata["allFiles"] = @(
-      $metadata["allFiles"] | ForEach-Object {
-        $item = [string]$_
-        if ($item -match '\.html$' -and -not [string]::IsNullOrWhiteSpace($relativeRoot)) {
-          ($relativeRoot + "/" + $item)
-        } else {
-          $item
-        }
-      }
-    )
-  }
-
-  if ($metadata.ContainsKey("sourceToTarget")) {
-    $oldSourceToTarget = Get-MapValue -Map $metadata -Key "sourceToTarget" -Default @{}
-    $newSourceToTarget = [ordered]@{}
-
-    foreach ($sourceKey in $oldSourceToTarget.Keys) {
-      $targetValue = [string]$oldSourceToTarget[$sourceKey]
-      if ($targetValue -match '\.html$' -and -not [string]::IsNullOrWhiteSpace($relativeRoot)) {
-        $newSourceToTarget[$sourceKey] = ($relativeRoot + "/" + $targetValue)
-      } else {
-        $newSourceToTarget[$sourceKey] = $targetValue
-      }
-    }
-
-    $metadata["sourceToTarget"] = $newSourceToTarget
-  }
-
-  $json = $metadata | ConvertTo-Json -Depth 100
-  Write-Utf8NoBom -Path $MetadataPath -Content ($json + [Environment]::NewLine)
-}
-
-function Update-PageHtml {
-  param(
-    [string]$PagePath,
-    [string]$RelativePagePath,
-    [string]$RootRelativePrefix
-  )
-
-  $content = [System.IO.File]::ReadAllText($PagePath, [System.Text.Encoding]::UTF8)
-  $relativePagePath = ($RelativePagePath -replace "\\", "/")
-
-  $content = [System.Text.RegularExpressions.Regex]::Replace(
-    $content,
-    '<meta\s+name="pathname"\s+content="[^"]*"\s*/?>',
-    ('<meta name="pathname" content="' + $relativePagePath + '">')
-  )
-
-  $content = [System.Text.RegularExpressions.Regex]::Replace(
-    $content,
-    '<meta\s+property="og:url"\s+content="[^"]*"\s*/?>',
-    ('<meta property="og:url" content="' + $relativePagePath + '">')
-  )
-
-  $injection = '<!-- vault-wrapper:start --><script defer src="' + $RootRelativePrefix + '/assets/wrapper.js" data-wrapper-root="' + $RootRelativePrefix + '"></script><!-- vault-wrapper:end -->'
-
-  if ($content -match '(?s)<!-- vault-wrapper:start -->.*?<!-- vault-wrapper:end -->') {
-    $content = $content -replace '(?s)<!-- vault-wrapper:start -->.*?<!-- vault-wrapper:end -->', $injection
-  }
-  elseif ($content -match '</body>') {
-    $content = $content -replace '</body>', ($injection + '</body>')
-  }
-  else {
-    $content += $injection
-  }
-
-  Write-Utf8NoBom -Path $PagePath -Content $content
+  return ($root + "/" + $key)
 }
 
 $rootPath = [System.IO.Path]::GetFullPath($RootDir)
@@ -338,19 +131,22 @@ foreach ($metadataFile in $metadataFiles) {
 
   foreach ($property in $webpages.GetEnumerator()) {
     $page = $property.Value
-    $relativePagePath = if ([string]::IsNullOrWhiteSpace($relativeRoot)) {
-      $property.Key
-    }
-    else {
-      ($relativeRoot.TrimEnd("/") + "/" + $property.Key)
+    $relativePagePath = Normalize-RepoRelativePagePath -RelativeRoot $relativeRoot -PageKey ([string]$property.Key)
+
+    $normalizedFileKey = [string]$property.Key
+    if (-not [string]::IsNullOrWhiteSpace($relativeRoot)) {
+      $prefix = ($relativeRoot.TrimEnd("/") + "/")
+      if ($normalizedFileKey.StartsWith($prefix)) {
+        $normalizedFileKey = $normalizedFileKey.Substring($prefix.Length)
+      }
     }
 
     $pages += [PSCustomObject]@{
-      file = [string]$property.Key
-      title = if (Get-MapValue -Map $page -Key "title") { [string](Get-MapValue -Map $page -Key "title") } else { [string]$property.Key }
-      path = $relativePagePath
+      file       = $normalizedFileKey
+      title      = if (Get-MapValue -Map $page -Key "title") { [string](Get-MapValue -Map $page -Key "title") } else { [string]$property.Key }
+      path       = $relativePagePath
       showInTree = [bool](Get-MapValue -Map $page -Key "showInTree" -Default $false)
-      treeOrder = if ($null -ne (Get-MapValue -Map $page -Key "treeOrder")) { [int](Get-MapValue -Map $page -Key "treeOrder") } else { 999999 }
+      treeOrder  = if ($null -ne (Get-MapValue -Map $page -Key "treeOrder")) { [int](Get-MapValue -Map $page -Key "treeOrder") } else { 999999 }
     }
   }
 
@@ -362,10 +158,17 @@ foreach ($metadataFile in $metadataFiles) {
   )
 
   $entryKey = if ($shownInTree.Count -gt 0) { [string]$shownInTree[0] } else { $null }
+
+  if (-not [string]::IsNullOrWhiteSpace($relativeRoot) -and -not [string]::IsNullOrWhiteSpace($entryKey)) {
+    $prefix = ($relativeRoot.TrimEnd("/") + "/")
+    if ($entryKey.StartsWith($prefix)) {
+      $entryKey = $entryKey.Substring($prefix.Length)
+    }
+  }
+
   $entryPage = if ($entryKey) {
     $pages | Where-Object { $_.file -eq $entryKey } | Select-Object -First 1
-  }
-  else {
+  } else {
     $null
   }
 
@@ -374,30 +177,42 @@ foreach ($metadataFile in $metadataFiles) {
     $entryKey = if ($entryPage) { $entryPage.file } else { $null }
   }
 
-  $entryMetadata = if ($entryKey) { Get-MapValue -Map $webpages -Key $entryKey } else { $null }
+  $entryMetadata = if ($entryKey) {
+    $candidateKeys = @($entryKey, (Normalize-RepoRelativePagePath -RelativeRoot $relativeRoot -PageKey $entryKey))
+    $found = $null
+    foreach ($candidate in $candidateKeys) {
+      $candidateValue = Get-MapValue -Map $webpages -Key $candidate
+      if ($null -ne $candidateValue) {
+        $found = $candidateValue
+        break
+      }
+    }
+    $found
+  } else {
+    $null
+  }
+
   $pageSummary = @(
     $pages | ForEach-Object {
       [PSCustomObject]@{
-        title = $_.title
-        path = $_.path
+        title      = $_.title
+        path       = $_.path
         showInTree = $_.showInTree
       }
     }
   )
 
   $sites += [PSCustomObject]@{
-    id = if ([string]::IsNullOrWhiteSpace($relativeRoot)) { "root-site" } else { ($relativeRoot.ToLowerInvariant() -replace "[^a-z0-9]+", "-").Trim("-") }
-    name = Split-Path $siteDir -Leaf
-    collection = $collection
-    root = $relativeRoot
-    entry = if ($entryPage) { $entryPage.path } else { "" }
-    pageTitle = if ($entryMetadata -and (Get-MapValue -Map $entryMetadata -Key "title")) { [string](Get-MapValue -Map $entryMetadata -Key "title") } elseif ($entryPage) { $entryPage.title } else { "" }
+    id          = if ([string]::IsNullOrWhiteSpace($relativeRoot)) { "root-site" } else { ($relativeRoot.ToLowerInvariant() -replace "[^a-z0-9]+", "-").Trim("-") }
+    name        = Split-Path $siteDir -Leaf
+    collection  = $collection
+    root        = $relativeRoot
+    entry       = if ($entryPage) { $entryPage.path } else { "" }
+    pageTitle   = if ($entryMetadata -and (Get-MapValue -Map $entryMetadata -Key "title")) { [string](Get-MapValue -Map $entryMetadata -Key "title") } elseif ($entryPage) { $entryPage.title } else { "" }
     description = if ($entryMetadata) { Get-CleanSnippet -Text ([string](Get-MapValue -Map $entryMetadata -Key "description" -Default "")) } else { "" }
-    pageCount = @($pageSummary).Count
-    pages = $pageSummary
+    pageCount   = @($pageSummary).Count
+    pages       = $pageSummary
   }
-
-  Update-MetadataFile -MetadataPath $metadataFile.FullName -RelativeRoot $relativeRoot
 }
 
 $sites = @(
@@ -409,8 +224,8 @@ $sites = @(
 
 $manifest = [PSCustomObject]@{
   generatedAt = (Get-Date).ToString("o")
-  siteCount = @($sites).Count
-  sites = @($sites)
+  siteCount   = @($sites).Count
+  sites       = @($sites)
 }
 
 $manifestPath = Join-Path $rootPath "site-index.json"
@@ -419,8 +234,26 @@ Write-Utf8NoBom -Path $manifestPath -Content (($manifest | ConvertTo-Json -Depth
 foreach ($site in $sites) {
   foreach ($page in $site.pages) {
     $pagePath = Join-Path $rootPath ($page.path -replace "/", "\")
+    if (-not (Test-Path $pagePath)) {
+      Write-Warning "Skipping missing page: $pagePath"
+      continue
+    }
+
     $rootRelative = Get-RootRelativePrefix -RelativeFilePath $page.path
-    Update-PageHtml -PagePath $pagePath -RelativePagePath $page.path -RootRelativePrefix $rootRelative
+    $injection = "<!-- vault-wrapper:start --><script defer src=""$rootRelative/assets/wrapper.js"" data-wrapper-root=""$rootRelative""></script><!-- vault-wrapper:end -->"
+    $content = [System.IO.File]::ReadAllText($pagePath, [System.Text.Encoding]::UTF8)
+
+    if ($content -match "(?s)<!-- vault-wrapper:start -->.*?<!-- vault-wrapper:end -->") {
+      $content = $content -replace "(?s)<!-- vault-wrapper:start -->.*?<!-- vault-wrapper:end -->", $injection
+    }
+    elseif ($content -match "</body>") {
+      $content = $content -replace "</body>", ($injection + "</body>")
+    }
+    else {
+      $content += $injection
+    }
+
+    Write-Utf8NoBom -Path $pagePath -Content $content
   }
 }
 
