@@ -90,26 +90,6 @@ function Write-Utf8NoBom {
   [System.IO.File]::WriteAllText($Path, $Content, $encoding)
 }
 
-function Normalize-RepoRelativePagePath {
-  param(
-    [string]$RelativeRoot,
-    [string]$PageKey
-  )
-
-  $root = ($RelativeRoot -replace "\\", "/").Trim("/")
-  $key = ([string]$PageKey -replace "\\", "/").TrimStart("/")
-
-  if ([string]::IsNullOrWhiteSpace($root)) {
-    return $key
-  }
-
-  if ($key -eq $root -or $key.StartsWith($root + "/")) {
-    return $key
-  }
-
-  return ($root + "/" + $key)
-}
-
 $rootPath = [System.IO.Path]::GetFullPath($RootDir)
 $metadataFiles = Get-ChildItem -Path $rootPath -Recurse -Filter metadata.json | Where-Object { $_.FullName -match "[\\/]site-lib[\\/]metadata\.json$" }
 $sites = @()
@@ -131,18 +111,15 @@ foreach ($metadataFile in $metadataFiles) {
 
   foreach ($property in $webpages.GetEnumerator()) {
     $page = $property.Value
-    $relativePagePath = Normalize-RepoRelativePagePath -RelativeRoot $relativeRoot -PageKey ([string]$property.Key)
-
-    $normalizedFileKey = [string]$property.Key
-    if (-not [string]::IsNullOrWhiteSpace($relativeRoot)) {
-      $prefix = ($relativeRoot.TrimEnd("/") + "/")
-      if ($normalizedFileKey.StartsWith($prefix)) {
-        $normalizedFileKey = $normalizedFileKey.Substring($prefix.Length)
-      }
+    $relativePagePath = if ([string]::IsNullOrWhiteSpace($relativeRoot)) {
+      [string]$property.Key
+    }
+    else {
+      ($relativeRoot.TrimEnd("/") + "/" + [string]$property.Key)
     }
 
     $pages += [PSCustomObject]@{
-      file       = $normalizedFileKey
+      file       = [string]$property.Key
       title      = if (Get-MapValue -Map $page -Key "title") { [string](Get-MapValue -Map $page -Key "title") } else { [string]$property.Key }
       path       = $relativePagePath
       showInTree = [bool](Get-MapValue -Map $page -Key "showInTree" -Default $false)
@@ -158,17 +135,10 @@ foreach ($metadataFile in $metadataFiles) {
   )
 
   $entryKey = if ($shownInTree.Count -gt 0) { [string]$shownInTree[0] } else { $null }
-
-  if (-not [string]::IsNullOrWhiteSpace($relativeRoot) -and -not [string]::IsNullOrWhiteSpace($entryKey)) {
-    $prefix = ($relativeRoot.TrimEnd("/") + "/")
-    if ($entryKey.StartsWith($prefix)) {
-      $entryKey = $entryKey.Substring($prefix.Length)
-    }
-  }
-
   $entryPage = if ($entryKey) {
     $pages | Where-Object { $_.file -eq $entryKey } | Select-Object -First 1
-  } else {
+  }
+  else {
     $null
   }
 
@@ -177,20 +147,7 @@ foreach ($metadataFile in $metadataFiles) {
     $entryKey = if ($entryPage) { $entryPage.file } else { $null }
   }
 
-  $entryMetadata = if ($entryKey) {
-    $candidateKeys = @($entryKey, (Normalize-RepoRelativePagePath -RelativeRoot $relativeRoot -PageKey $entryKey))
-    $found = $null
-    foreach ($candidate in $candidateKeys) {
-      $candidateValue = Get-MapValue -Map $webpages -Key $candidate
-      if ($null -ne $candidateValue) {
-        $found = $candidateValue
-        break
-      }
-    }
-    $found
-  } else {
-    $null
-  }
+  $entryMetadata = if ($entryKey) { Get-MapValue -Map $webpages -Key $entryKey } else { $null }
 
   $pageSummary = @(
     $pages | ForEach-Object {
@@ -234,6 +191,7 @@ Write-Utf8NoBom -Path $manifestPath -Content (($manifest | ConvertTo-Json -Depth
 foreach ($site in $sites) {
   foreach ($page in $site.pages) {
     $pagePath = Join-Path $rootPath ($page.path -replace "/", "\")
+
     if (-not (Test-Path $pagePath)) {
       Write-Warning "Skipping missing page: $pagePath"
       continue
